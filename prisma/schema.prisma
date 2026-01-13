@@ -1,0 +1,354 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Management
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  password          String?
+  firstName         String
+  lastName          String
+  avatar            String?
+  isEmailVerified   Boolean  @default(false)
+  isActive          Boolean  @default(true)
+  lastLoginAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  // OAuth fields
+  googleId          String?  @unique
+  microsoftId       String?  @unique
+  
+  // Relations
+  userOrganizations UserOrganization[]
+  refreshTokens     RefreshToken[]
+  auditLogs         AuditLog[]
+  
+  @@index([email])
+  @@index([googleId])
+  @@index([microsoftId])
+  @@map("users")
+}
+
+// Organization Management
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  logo          String?
+  website       String?
+  industry      String?
+  size          String?
+  country       String?
+  timezone      String   @default("UTC")
+  currency      String   @default("USD")
+  fiscalYearEnd String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  // Relations
+  userOrganizations UserOrganization[]
+  transactions      Transaction[]
+  categories        Category[]
+  budgets           Budget[]
+  reports           Report[]
+  aiInsights        AiInsight[]
+  auditLogs         AuditLog[]
+  
+  @@index([slug])
+  @@index([isActive])
+  @@map("organizations")
+}
+
+// User-Organization Relationship
+model UserOrganization {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  roleId         String
+  isActive       Boolean  @default(true)
+  joinedAt       DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([roleId])
+  @@map("user_organizations")
+}
+
+// Role Management
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions Json // Array of permission strings
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userOrganizations UserOrganization[]
+  
+  @@map("roles")
+}
+
+// Refresh Token Management
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// Financial Categories
+model Category {
+  id             String      @id @default(cuid())
+  name           String
+  description    String?
+  type           CategoryType
+  icon           String?
+  color          String?
+  isSystem       Boolean     @default(false)
+  parentId       String?
+  organizationId String
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent         Category?      @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children       Category[]     @relation("CategoryHierarchy")
+  transactions   Transaction[]
+  budgets        Budget[]
+  
+  @@unique([organizationId, name, type])
+  @@index([organizationId])
+  @@index([type])
+  @@index([parentId])
+  @@map("categories")
+}
+
+// Financial Transactions
+model Transaction {
+  id                String           @id @default(cuid())
+  amount            Decimal          @db.Decimal(15, 2)
+  currency          String           @default("USD")
+  description       String
+  notes             String?
+  type              TransactionType
+  status            TransactionStatus @default(COMPLETED)
+  date              DateTime
+  reference         String?
+  externalId        String?
+  attachment        String?
+  isRecurring       Boolean          @default(false)
+  recurringPattern  String?
+  organizationId    String
+  categoryId        String
+  createdById       String
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  deletedAt         DateTime?
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category   Category     @relation(fields: [categoryId], references: [id])
+  createdBy  User         @relation(fields: [createdById], references: [id])
+  
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([createdById])
+  @@index([date])
+  @@index([type])
+  @@index([status])
+  @@map("transactions")
+}
+
+// Budget Management
+model Budget {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  amount         Decimal      @db.Decimal(15, 2)
+  currency       String       @default("USD")
+  type           BudgetType   @default(MONTHLY)
+  periodStart    DateTime
+  periodEnd      DateTime
+  alertThreshold Decimal      @db.Decimal(5, 2) @default(80.00) // Percentage
+  organizationId String
+  categoryId     String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     Category?    @relation(fields: [categoryId], references: [id])
+  
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@map("budgets")
+}
+
+// Financial Reports
+model Report {
+  id             String      @id @default(cuid())
+  name           String
+  type           ReportType
+  description    String?
+  filters        Json        // Report filters
+  data           Json        // Report data
+  fileUrl        String?
+  fileFormat     String?
+  organizationId String
+  generatedById  String
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  generatedBy  User       @relation(fields: [generatedById], references: [id])
+  
+  @@index([organizationId])
+  @@index([generatedById])
+  @@index([type])
+  @@map("reports")
+}
+
+// AI Insights and Recommendations
+model AiInsight {
+  id             String      @id @default(cuid())
+  type           InsightType
+  title          String
+  description    String
+  data           Json        // Structured data for the insight
+  confidence     Decimal     @db.Decimal(5, 2) // 0-100%
+  impact         String?     // HIGH, MEDIUM, LOW
+  recommendation String?
+  isRead         Boolean     @default(false)
+  organizationId String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  @@index([organizationId])
+  @@index([type])
+  @@index([isRead])
+  @@map("ai_insights")
+}
+
+// Audit Logging
+model AuditLog {
+  id             String     @id @default(cuid())
+  action         String
+  resource       String
+  resourceId     String?
+  oldValue       Json?
+  newValue       Json?
+  changes        Json?
+  ipAddress      String?
+  userAgent      String?
+  organizationId String
+  userId         String
+  createdAt      DateTime   @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+  
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// Enums
+enum CategoryType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum BudgetType {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  CUSTOM
+}
+
+enum ReportType {
+  PROFIT_LOSS
+  CASH_FLOW
+  EXPENSE_ANALYTICS
+  BUDGET_VS_ACTUAL
+  BURN_RATE
+  RUNWAY
+  CUSTOM
+}
+
+enum InsightType {
+  CASH_FLOW_ANALYSIS
+  BUDGET_ALERT
+  BURN_RATE_WARNING
+  RUNWAY_ESTIMATION
+  EXPENSE_TREND
+  REVENUE_FORECAST
+  RISK_ASSESSMENT
+  OPPORTUNITY
+}
